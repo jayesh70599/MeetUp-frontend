@@ -592,11 +592,16 @@ return (
                 )}
                 {showChat && (
                     <>
-                        <div ref={chatMessagesRef} className="flex-1 mb-4 overflow-y-auto p-2 bg-gray-900 rounded min-h-0">
+                        {/* <div ref={chatMessagesRef} className="flex-1 mb-4 overflow-y-auto p-2 bg-gray-900 rounded min-h-0">
                             {(messages || []).map((msg, index) => (
                                 <ChatMessage key={index} msg={msg} myPeerId={myPeerId} myUserName={myName} /> 
                             ))}
-                        </div>
+                        </div> */}
+                        <div ref={chatMessagesRef} className="flex-1 mb-4 overflow-y-auto p-2 bg-gray-900 rounded min-h-0">
+                             {(messages || []).map((msg, index) => (
+                                 <ChatMessage key={index} msg={msg} myPeerId={myPeerId} myUserName={myName} />
+                             ))}
+                         </div>
                         <form onSubmit={handleSendChat} className="flex flex-shrink-0">
                            {/* Chat input form */}
                            <input
