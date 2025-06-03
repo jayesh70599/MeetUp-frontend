@@ -137,6 +137,10 @@ function MeetingRoom() {
   const navigate = useNavigate();
   const { user } = useAuth(); // We might not need 'user' directly anymore, but good to have
 
+  const [streamForHook, setStreamForHook] = useState(null);
+  // State for what stream is displayed locally
+  const [displayStream, setDisplayStream] = useState(null);
+
   // Component-specific state (UI and local media)
   const [myStream, setMyStream] = useState(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -159,7 +163,8 @@ function MeetingRoom() {
 const { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerStatuses, sendStatusUpdate, replaceVideoStream } = usePeer(
       meetingId,
       myName || 'guest',
-      myStream,
+      streamForHook,
+    //  myStream,
       !isMuted,    // Pass initial audio status (true if *not* muted)
       !isVideoOff  // Pass initial video status (true if *not* off)
   );
@@ -172,8 +177,10 @@ const { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerSt
       .getUserMedia({ video: true, audio: true })
       .then((stream) => {
         setMyStream(stream);
-        myStreamRef.current = stream; // Store in ref for cleanup
+       // myStreamRef.current = stream; // Store in ref for cleanup
         cameraStreamRef.current = stream; // Store as the initial camera stream
+         setStreamForHook(stream);         // Set the stream for usePeer (once)
+        setDisplayStream(stream);         // Display camera stream locally initially
         console.log('MeetingRoom: Got user media stream.');
       })
       .catch((err) => {
@@ -186,12 +193,14 @@ const { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerSt
     // This cleanup runs when the component unmounts (leaving the page)
     return () => {
         console.log("MeetingRoom: Cleaning up media stream.");
-        if (myStreamRef.current) {
-            myStreamRef.current.getTracks().forEach(track => track.stop());
-        }
-         if (screenStreamRef.current) {
-            screenStreamRef.current.getTracks().forEach(track => track.stop());
-        }
+         if (cameraStreamRef.current) cameraStreamRef.current.getTracks().forEach(track => track.stop());
+      if (screenStreamRef.current) screenStreamRef.current.getTracks().forEach(track => track.stop());
+        // if (myStreamRef.current) {
+        //     myStreamRef.current.getTracks().forEach(track => track.stop());
+        // }
+        //  if (screenStreamRef.current) {
+        //     screenStreamRef.current.getTracks().forEach(track => track.stop());
+        // }
     }
   }, [navigate]); // Only run once on mount
 
@@ -203,24 +212,56 @@ const { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerSt
   }, [messages]); // Scroll whenever messages change
 
   // --- UI Control Functions ---
-  const toggleMute = () => {
-    if (myStream) {
-      const audioTrack = myStream.getAudioTracks()[0];
-      const newEnabledState = !audioTrack.enabled;
-      audioTrack.enabled = newEnabledState;
-      setIsMuted(!newEnabledState);
-      sendStatusUpdate('audio', newEnabledState); // <-- Send update
+  // const toggleMute = () => {
+  //   if (myStream) {
+  //     const audioTrack = myStream.getAudioTracks()[0];
+  //     const newEnabledState = !audioTrack.enabled;
+  //     audioTrack.enabled = newEnabledState;
+  //     setIsMuted(!newEnabledState);
+  //     sendStatusUpdate('audio', newEnabledState); // <-- Send update
+  //   }
+  // };
+
+   const toggleMute = () => {
+    if (cameraStreamRef.current) { // Always control the camera's audio track
+      const audioTrack = cameraStreamRef.current.getAudioTracks()[0];
+      if (audioTrack) {
+        const newEnabledState = !audioTrack.enabled;
+        audioTrack.enabled = newEnabledState;
+        setIsMuted(!newEnabledState);
+        sendStatusUpdate('audio', newEnabledState);
+      }
     }
   };
 
 
+  // const toggleVideo = () => {
+  //   if (myStream) {
+  //     const videoTrack = myStream.getVideoTracks()[0];
+  //     const newEnabledState = !videoTrack.enabled;
+  //     videoTrack.enabled = newEnabledState;
+  //     setIsVideoOff(!newEnabledState);
+  //     sendStatusUpdate('video', newEnabledState); // <-- Send update
+  //   }
+  // };
+
   const toggleVideo = () => {
-    if (myStream) {
-      const videoTrack = myStream.getVideoTracks()[0];
-      const newEnabledState = !videoTrack.enabled;
-      videoTrack.enabled = newEnabledState;
-      setIsVideoOff(!newEnabledState);
-      sendStatusUpdate('video', newEnabledState); // <-- Send update
+    if (cameraStreamRef.current) { // Always control the camera's video track
+      const videoTrack = cameraStreamRef.current.getVideoTracks()[0];
+      if (videoTrack) {
+          const newEnabledState = !videoTrack.enabled;
+          videoTrack.enabled = newEnabledState;
+          setIsVideoOff(!newEnabledState);
+          sendStatusUpdate('video', newEnabledState);
+
+          // If we are NOT screen sharing, and we turn video off/on,
+          // we reflect this immediately by replacing the track for peers.
+          // If we ARE screen sharing, this button just toggles the camera track
+          // state, but screen share continues to be sent.
+          if (!isScreenSharing) {
+              replaceVideoStream(cameraStreamRef.current);
+          }
+      }
     }
   };
 
@@ -238,47 +279,85 @@ const { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerSt
   };
 
   // --- Screen Sharing Logic ---
+  // const startScreenShare = () => {
+  //     navigator.mediaDevices.getDisplayMedia({ cursor: true })
+  //         .then(screenStream => {
+  //             const screenTrack = screenStream.getVideoTracks()[0];
+  //             if (!screenTrack) return;
+
+  //             setIsScreenSharing(true);
+  //             screenStreamRef.current = screenStream; // Store the screen stream
+
+  //             // Replace the video track in all connections
+  //             replaceVideoStream(screenStream);
+
+  //             // Update local display to show screen share (optional, but good for feedback)
+  //             setMyStream(screenStream);
+
+  //             // When the user stops sharing via the browser's UI
+  //             screenTrack.onended = () => {
+  //                 stopScreenShare(true); // Call stop, indicate it wasn't via button
+  //             };
+  //         })
+  //         .catch(err => {
+  //             console.error("Failed to get display media:", err);
+  //             alert("Could not start screen sharing.");
+  //         });
+  // };
+
+  // const stopScreenShare = (wasExternal = false) => {
+  //     if (!isScreenSharing) return;
+
+  //     // Stop the screen share tracks *if* it wasn't stopped externally
+  //     if (!wasExternal && screenStreamRef.current) {
+  //         screenStreamRef.current.getTracks().forEach(track => track.stop());
+  //     }
+  //     screenStreamRef.current = null;
+
+  //     // Replace with the camera stream
+  //     replaceVideoStream(cameraStreamRef.current);
+
+  //     // Update local display back to camera
+  //     setMyStream(cameraStreamRef.current);
+  //     setIsScreenSharing(false);
+  // };
+
   const startScreenShare = () => {
-      navigator.mediaDevices.getDisplayMedia({ cursor: true })
-          .then(screenStream => {
-              const screenTrack = screenStream.getVideoTracks()[0];
-              if (!screenTrack) return;
+    if (!cameraStreamRef.current) return; // Ensure camera stream is available
 
-              setIsScreenSharing(true);
-              screenStreamRef.current = screenStream; // Store the screen stream
+    navigator.mediaDevices.getDisplayMedia({ video: { cursor: "always" }, audio: false }) // Typically no audio for screen share
+      .then(newScreenStream => {
+        screenStreamRef.current = newScreenStream;
+        const screenVideoTrack = newScreenStream.getVideoTracks()[0];
 
-              // Replace the video track in all connections
-              replaceVideoStream(screenStream);
+        if (screenVideoTrack) {
+          replaceVideoStream(newScreenStream); // Send screen share to peers
+          setDisplayStream(newScreenStream);   // Show screen share locally
+          setIsScreenSharing(true);
 
-              // Update local display to show screen share (optional, but good for feedback)
-              setMyStream(screenStream);
-
-              // When the user stops sharing via the browser's UI
-              screenTrack.onended = () => {
-                  stopScreenShare(true); // Call stop, indicate it wasn't via button
-              };
-          })
-          .catch(err => {
-              console.error("Failed to get display media:", err);
-              alert("Could not start screen sharing.");
-          });
+          screenVideoTrack.onended = () => {
+            console.log("Screen share ended by browser control");
+            stopScreenShare(true); // Indicate it was stopped externally
+          };
+        }
+      })
+      .catch(err => {
+        console.error("Error starting screen share:", err);
+        setIsScreenSharing(false); // Reset state if it fails
+      });
   };
 
   const stopScreenShare = (wasExternal = false) => {
-      if (!isScreenSharing) return;
+    if (!cameraStreamRef.current) return;
 
-      // Stop the screen share tracks *if* it wasn't stopped externally
-      if (!wasExternal && screenStreamRef.current) {
-          screenStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-      screenStreamRef.current = null;
+    if (!wasExternal && screenStreamRef.current) {
+      screenStreamRef.current.getTracks().forEach(track => track.stop());
+    }
+    screenStreamRef.current = null;
 
-      // Replace with the camera stream
-      replaceVideoStream(cameraStreamRef.current);
-
-      // Update local display back to camera
-      setMyStream(cameraStreamRef.current);
-      setIsScreenSharing(false);
+    replaceVideoStream(cameraStreamRef.current); // Switch back to sending camera
+    setDisplayStream(cameraStreamRef.current);     // Show camera locally
+    setIsScreenSharing(false);
   };
 
   const handleScreenShareToggle = () => {
@@ -522,8 +601,119 @@ const { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerSt
 // export default MeetingRoom;
 
 
+// return (
+//     // Revert to the layout structure from Step 28 for stability
+//     <div className="h-screen bg-gray-900 text-white flex flex-col">
+//       <header className="bg-gray-800 p-4 text-center text-xl font-semibold shadow-md z-20 flex-shrink-0">
+//         Meeting ID: <span className="font-mono bg-gray-700 px-2 py-1 rounded">{meetingId}</span>
+//       </header>
+
+//       <main className="flex-1 flex overflow-hidden min-h-0">
+//         <section className={`flex-1 p-4 grid gap-4 overflow-auto ${gridLayoutClass} min-h-0`}>
+//           {myStream && (
+//             <Video
+//               stream={myStream}
+//               isMuted={true}
+//               label={`${myName} (You)`} // Use myName
+//               audioStatus={!isMuted}
+//               videoStatus={!isVideoOff}
+//             />
+//           )}
+//           {Object.entries(remoteStreams).map(([peerId, stream]) => {
+//             const participant = participantsList.find(p => p.peerId === peerId);
+//             return (
+//               <Video
+//                 key={peerId}
+//                 stream={stream}
+//                 label={participant?.userName || peerId} // Use userName from participantList
+//                 audioStatus={peerStatuses[peerId]?.audio ?? true}
+//                 videoStatus={peerStatuses[peerId]?.video ?? true}
+//               />
+//             );
+//           })}
+//         </section>
+
+//         {(showParticipants || showChat) && (
+//             <aside className="w-72 bg-gray-800 p-4 shadow-lg border-l border-gray-700 flex flex-col overflow-hidden">
+//                 <div className="flex mb-4 flex-shrink-0">
+//                     {/* Tabs for Participants and Chat */}
+//                     <button
+//                         className={`py-2 px-4 flex-1 ${showParticipants ? 'bg-gray-700 border-b-2 border-indigo-500' : 'text-gray-400'}`}
+//                         onClick={toggleParticipantsPanel}
+//                     >
+//                         Participants ({participantsList.length + 1})
+//                     </button>
+//                     <button
+//                         className={`py-2 px-4 flex-1 ${showChat ? 'bg-gray-700 border-b-2 border-indigo-500' : 'text-gray-400'}`}
+//                         onClick={toggleChatPanel}
+//                     >
+//                         Chat
+//                     </button>
+//                 </div>
+//                 {showParticipants && (
+//                     <ul className="space-y-3 overflow-y-auto flex-1 min-h-0">
+//                         <li className="flex items-center p-2 bg-gray-700 rounded">
+//                             {isMuted ? <FaMicrophoneSlash className="mr-3 text-red-500" /> : <FaMicrophone className="mr-3 text-green-500" />}
+//                             {!isVideoOff ? <FaVideo className="mr-3 text-green-500" /> : <FaVideoSlash className="mr-3 text-red-500" />}
+//                             <span>{myName} (You)</span> {/* Use myName */}
+//                         </li>
+//                         {participantsList.map(p => {
+//                             const status = peerStatuses[p.peerId] || { audio: true, video: true };
+//                             return (
+//                                <li key={p.peerId} className="flex items-center p-2">
+//                                    {status.audio ? <FaMicrophone className="mr-3 text-green-500" /> : <FaMicrophoneSlash className="mr-3 text-red-500" />}
+//                                    {status.video ? <FaVideo className="mr-3 text-green-500" /> : <FaVideoSlash className="mr-3 text-red-500" />}
+//                                    <span className='truncate'>{p.userName || p.peerId}</span> {/* Display userName */}
+//                                </li>
+//                             )
+//                         })}
+//                     </ul>
+//                 )}
+//                 {showChat && (
+//                     <>
+//                         {/* <div ref={chatMessagesRef} className="flex-1 mb-4 overflow-y-auto p-2 bg-gray-900 rounded min-h-0">
+//                             {(messages || []).map((msg, index) => (
+//                                 <ChatMessage key={index} msg={msg} myPeerId={myPeerId} myUserName={myName} /> 
+//                             ))}
+//                         </div> */}
+//                         <div ref={chatMessagesRef} className="flex-1 mb-4 overflow-y-auto p-2 bg-gray-900 rounded min-h-0">
+//                              {(messages || []).map((msg, index) => (
+//                                  <ChatMessage key={index} msg={msg} myPeerId={myPeerId} myUserName={myName} />
+//                              ))}
+//                          </div>
+//                         <form onSubmit={handleSendChat} className="flex flex-shrink-0">
+//                            {/* Chat input form */}
+//                            <input
+//                                 type="text" value={chatInput} onChange={(e) => setChatInput(e.target.value)}
+//                                 placeholder="Type your message..."
+//                                 className="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded-l-md focus:outline-none text-sm text-white"
+//                             />
+//                             <button type="submit" className="py-2 px-4 bg-indigo-600 hover:bg-indigo-700 rounded-r-md">
+//                                 <FaPaperPlane />
+//                             </button>
+//                         </form>
+//                     </>
+//                 )}
+//             </aside>
+//         )}
+//       </main>
+//       <footer className="bg-gray-800 p-4 flex justify-center items-center space-x-4 md:space-x-6 shadow-up z-20 flex-shrink-0">
+//         {/* Control buttons */}
+//            <button onClick={toggleMute} className={`p-3 rounded-full ${isMuted ? 'bg-red-600' : 'bg-gray-600'}`}><FaMicrophoneSlash size={20} /></button>
+//         <button onClick={toggleVideo} className={`p-3 rounded-full ${isVideoOff ? 'bg-red-600' : 'bg-gray-600'}`}><FaVideoSlash size={20} /></button>
+//         <button onClick={handleScreenShareToggle} className={`p-3 rounded-full ${isScreenSharing ? 'bg-green-600' : 'bg-gray-600'}`}><FaDesktop size={20} /></button>
+//         <button onClick={toggleParticipantsPanel} className={`p-3 rounded-full ${showParticipants ? 'bg-indigo-600' : 'bg-gray-600'}`}><FaUsers size={20} /></button>
+//         <button onClick={toggleChatPanel} className={`p-3 rounded-full ${showChat ? 'bg-indigo-600' : 'bg-gray-600'}`}><FaComment size={20} /></button>
+//         <button onClick={leaveCall} className="p-3 px-6 rounded-full bg-red-600"><FaPhoneSlash size={20} /> Leave</button>
+//       </footer>
+//     </div>
+//   );
+// }
+
+// export default MeetingRoom;
+
+
 return (
-    // Revert to the layout structure from Step 28 for stability
     <div className="h-screen bg-gray-900 text-white flex flex-col">
       <header className="bg-gray-800 p-4 text-center text-xl font-semibold shadow-md z-20 flex-shrink-0">
         Meeting ID: <span className="font-mono bg-gray-700 px-2 py-1 rounded">{meetingId}</span>
@@ -531,13 +721,15 @@ return (
 
       <main className="flex-1 flex overflow-hidden min-h-0">
         <section className={`flex-1 p-4 grid gap-4 overflow-auto ${gridLayoutClass} min-h-0`}>
-          {myStream && (
+          {/* Display the current local stream (camera or screen share) */}
+          {displayStream && (
             <Video
-              stream={myStream}
-              isMuted={true}
-              label={`${myName} (You)`} // Use myName
-              audioStatus={!isMuted}
-              videoStatus={!isVideoOff}
+              stream={displayStream}
+              isMuted={true} // Local video is always "muted" in the <video> tag to prevent self-echo
+              label={`${myName} (You) ${isScreenSharing ? '- Sharing Screen' : ''}`}
+              // Pass actual status of the CAMERA audio/video for the icon on your own video
+              audioStatus={cameraStreamRef.current?.getAudioTracks()[0]?.enabled ?? !isMuted}
+              videoStatus={cameraStreamRef.current?.getVideoTracks()[0]?.enabled ?? !isVideoOff}
             />
           )}
           {Object.entries(remoteStreams).map(([peerId, stream]) => {
@@ -546,7 +738,7 @@ return (
               <Video
                 key={peerId}
                 stream={stream}
-                label={participant?.userName || peerId} // Use userName from participantList
+                label={participant?.userName || peerId}
                 audioStatus={peerStatuses[peerId]?.audio ?? true}
                 videoStatus={peerStatuses[peerId]?.video ?? true}
               />
@@ -554,6 +746,7 @@ return (
           })}
         </section>
 
+        {/* Side Panel (Keep as is from Step 29, ensuring ChatMessage and Participant list use userNames) */}
         {(showParticipants || showChat) && (
             <aside className="w-72 bg-gray-800 p-4 shadow-lg border-l border-gray-700 flex flex-col overflow-hidden">
                 <div className="flex mb-4 flex-shrink-0">
@@ -618,12 +811,23 @@ return (
             </aside>
         )}
       </main>
+
       <footer className="bg-gray-800 p-4 flex justify-center items-center space-x-4 md:space-x-6 shadow-up z-20 flex-shrink-0">
-        {/* Control buttons */}
-           <button onClick={toggleMute} className={`p-3 rounded-full ${isMuted ? 'bg-red-600' : 'bg-gray-600'}`}><FaMicrophoneSlash size={20} /></button>
-        <button onClick={toggleVideo} className={`p-3 rounded-full ${isVideoOff ? 'bg-red-600' : 'bg-gray-600'}`}><FaVideoSlash size={20} /></button>
-        <button onClick={handleScreenShareToggle} className={`p-3 rounded-full ${isScreenSharing ? 'bg-green-600' : 'bg-gray-600'}`}><FaDesktop size={20} /></button>
-        <button onClick={toggleParticipantsPanel} className={`p-3 rounded-full ${showParticipants ? 'bg-indigo-600' : 'bg-gray-600'}`}><FaUsers size={20} /></button>
+        {/* Controls - Ensure toggleMute/toggleVideo now reflect the camera stream status */}
+        <button onClick={toggleMute} title={isMuted ? 'Unmute Mic' : 'Mute Mic'}
+            className={`p-3 rounded-full ${isMuted ? 'bg-red-600' : 'bg-gray-600'}`}>
+            {isMuted ? <FaMicrophoneSlash size={20} /> : <FaMicrophone size={20} />}
+        </button>
+        <button onClick={toggleVideo} title={isVideoOff ? 'Start Camera' : 'Stop Camera'}
+            className={`p-3 rounded-full ${isVideoOff ? 'bg-red-600' : 'bg-gray-600'}`}>
+            {isVideoOff ? <FaVideoSlash size={20} /> : <FaVideo size={20} />}
+        </button>
+        <button onClick={handleScreenShareToggle} title={isScreenSharing ? 'Stop Sharing Screen' : 'Share Screen'}
+            className={`p-3 rounded-full ${isScreenSharing ? 'bg-green-600' : 'bg-gray-600'}`}>
+            <FaDesktop size={20} />
+        </button>
+        {/* ... Other control buttons (Participants, Chat, Leave) ... */}
+         <button onClick={toggleParticipantsPanel} className={`p-3 rounded-full ${showParticipants ? 'bg-indigo-600' : 'bg-gray-600'}`}><FaUsers size={20} /></button>
         <button onClick={toggleChatPanel} className={`p-3 rounded-full ${showChat ? 'bg-indigo-600' : 'bg-gray-600'}`}><FaComment size={20} /></button>
         <button onClick={leaveCall} className="p-3 px-6 rounded-full bg-red-600"><FaPhoneSlash size={20} /> Leave</button>
       </footer>

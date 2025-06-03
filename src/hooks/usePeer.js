@@ -5,7 +5,7 @@ import Peer from 'peerjs';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:5000'; // Your backend URL
 
-export const usePeer = (meetingId, userName, myStream, initialAudio, initialVideo) => {
+export const usePeer = (meetingId, userName, initialLocalStream, initialAudioEnabled, initialVideoEnabled) => {
   const [myPeerId, setMyPeerId] = useState(null);
   const [remoteStreams, setRemoteStreams] = useState({}); // { peerId: stream }
   const [messages, setMessages] = useState([]); // <-- Add state for messages
@@ -58,18 +58,6 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
     }
   };
 
-    // --- CHAT: Add Message Function ---
-  const addMessage = useCallback((newMessage) => {
-      setMessages((prevMessages) => [...prevMessages, newMessage]);
-  }, []);
-
-    // --- CHAT: Send Message Function ---
-  const sendMessage = useCallback((message) => {
-      if (socketRef.current && message.trim() !== '') {
-          socketRef.current.emit('send-chat-message', { meetingId, message });
-      }
-  }, [meetingId]);
-
   // --- NEW: Function to replace the video track ---
   const replaceVideoStream = useCallback((newStream) => {
       if (!peerRef.current || !newStream) return;
@@ -115,9 +103,22 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
   }, []);
 
 
+      // --- CHAT: Add Message Function ---
+  const addMessage = useCallback((newMessage) => {
+      setMessages((prevMessages) => [...prevMessages, newMessage]);
+  }, []);
+
+    // --- CHAT: Send Message Function ---
+  const sendMessage = useCallback((message) => {
+      if (socketRef.current && message.trim() !== '') {
+          socketRef.current.emit('send-chat-message', { meetingId, message });
+      }
+  }, [meetingId]);
+
+
   // --- Main Effect: Initialize PeerJS & Socket.IO ---
   useEffect(() => {
-    if (!myStream) {
+    if (!initialLocalStream) {
         console.log("usePeer: Waiting for myStream...");
         return;
     }
@@ -136,7 +137,7 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
 
       socket.on('connect', () => {
         console.log(`usePeer: Connected to Socket.IO: ${socket.id}`);
-        socket.emit('join-room', { meetingId, userName, peerId: id,  initialAudio, initialVideo }) // <-- Send initial status });
+        socket.emit('join-room', { meetingId, userName, peerId: id,  initialAudio: initialAudioEnabled, initialVideo: initialVideoEnabled }) // <-- Send initial status });
       });
 
       // --- Update Participant Handling ---
@@ -145,7 +146,8 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
         console.log('usePeer: Existing participants:', participants);
         setParticipantsList(participants); // Update state
         participants.forEach(p => {
-          callPeer(p.peerId, myStream, peer);
+          //callPeer(p.peerId, myStream, peer);
+          callPeer(p.peerId, initialLocalStream, peer);
           initialStatuses[p.peerId] = p.status; // <-- Store initial status
         });
         setPeerStatuses(initialStatuses); // <-- Set initial statuses
@@ -156,7 +158,8 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
         setParticipantsList((prev) => [...prev, { socketId, peerId: newPeerId, userName: joinedUserName }]); // Update state
         setPeerStatuses((prev) => ({ ...prev, [newPeerId]: status }));
         addMessage({ senderId: 'System', message: `${joinedUserName || newPeerId} joined the call.` }); // System message
-        callPeer(newPeerId, myStream, peer);
+       // callPeer(newPeerId, myStream, peer);
+        callPeer(newPeerId, initialLocalStream, peer);
       });
 
       socket.on('user-left', ({ socketId, peerId: leftPeerId, userName: leftUserName }) => {
@@ -198,7 +201,7 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
 
     peer.on('call', (call) => {
       console.log(`usePeer: Incoming call from ${call.peer}`);
-      call.answer(myStream);
+      call.answer(initialLocalStream);
       call.on('stream', (remoteStream) => {
         console.log(`usePeer: Received remote stream from ${call.peer}`);
         addRemoteStream(call.peer, remoteStream);
@@ -220,7 +223,7 @@ export const usePeer = (meetingId, userName, myStream, initialAudio, initialVide
       if (peerRef.current) peerRef.current.destroy();
       // Don't stop the stream here, let the component manage its own stream lifecycle
     };
-  }, [myStream, meetingId, userName, addMessage, initialAudio, initialVideo]); // Depend on these values
+  }, [ initialLocalStream, meetingId, userName, addMessage]); // Depend on these values
 
   // Return the necessary values for the component to use
   return { myPeerId, remoteStreams, messages, sendMessage, participantsList, peerStatuses, sendStatusUpdate, replaceVideoStream };
